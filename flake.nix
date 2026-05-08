@@ -15,7 +15,7 @@
       ]);
 
       compress-script = pkgs.writeShellApplication {
-        name = "rasterize-and-compress";
+        name = "pdflat";
         runtimeInputs = [ python ];
         text = ''
           exec ${python}/bin/python ${./pdflat.py} "$@"
