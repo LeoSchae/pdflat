@@ -18,7 +18,7 @@
         name = "rasterize-and-compress";
         runtimeInputs = [ python ];
         text = ''
-          exec ${python}/bin/python ${./rasterize_and_compress.py} "$@"
+          exec ${python}/bin/python ${./pdflat.py} "$@"
         '';
       };
     in {
