@@ -26,14 +26,14 @@ def parse_args() -> argparse.Namespace:
         help="JPEG quality (0-100, higher is better).",
     )
     parser.add_argument(
-        "--glob",
-        help="Glob pattern to match PDFs (e.g., 'docs/*.pdf').",
+        "input_pdfs",
+        nargs="+",
+        help="One or more input PDF paths.",
     )
-    parser.add_argument("input_pdf", nargs="?", help="Path to the input PDF.")
     parser.add_argument(
         "-o",
         "--output",
-        help="Optional output PDF path (default: <input>_compressed.pdf).",
+        help="Optional output PDF path or directory.",
     )
     parser.add_argument(
         "--inplace",
@@ -92,60 +92,54 @@ def main() -> None:
     if args.output and args.inplace:
         raise SystemExit("Use either --output or --inplace, not both")
 
-    if args.glob and args.input_pdf:
-        raise SystemExit("Use either --glob or an input PDF, not both")
-    if not args.glob and not args.input_pdf:
-        raise SystemExit("Provide an input PDF or use --glob")
+    input_paths = [Path(path).expanduser().resolve() for path in args.input_pdfs]
+    for input_path in input_paths:
+        if not input_path.exists():
+            raise SystemExit(f"Input file does not exist: {input_path}")
+        if input_path.suffix.lower() != ".pdf":
+            raise SystemExit(f"Input file must be a PDF: {input_path}")
 
-    if args.glob:
-        pattern = args.glob
-        matches = sorted(Path().glob(pattern))
-        pdfs = [path for path in matches if path.suffix.lower() == ".pdf"]
-        if not pdfs:
-            raise SystemExit(f"No PDF files matched glob: {pattern}")
-        output_dir = None
-        if args.output:
-            output_dir = Path(args.output).expanduser().resolve()
-            if output_dir.exists() and output_dir.is_file():
-                raise SystemExit("--output must be a directory when used with --glob")
-            output_dir.mkdir(parents=True, exist_ok=True)
-        for input_path in pdfs:
-            input_path = input_path.expanduser().resolve()
-            if args.inplace:
-                output_path = input_path
-            elif output_dir:
-                output_path = output_dir / input_path.name
+    output_dir = None
+    if args.output:
+        output_path_value = Path(args.output).expanduser().resolve()
+        if len(input_paths) > 1:
+            if output_path_value.exists():
+                if not output_path_value.is_dir():
+                    raise SystemExit(
+                        "--output must be a directory when multiple inputs are provided"
+                    )
+                output_dir = output_path_value
             else:
-                output_path = input_path.with_name(
-                    f"{input_path.stem}_compressed.pdf"
-                )
-            print(
-                f"Compressing {input_path.name} -> {output_path.name} | "
-                f"dpi={args.dpi} quality={args.quality}"
-            )
-            compress_pdf(input_path, output_path, args.dpi, args.quality)
-        print(f"Processed {len(pdfs)} file(s)")
-        return
+                if output_path_value.suffix.lower() == ".pdf":
+                    raise SystemExit(
+                        "--output must be a directory when multiple inputs are provided"
+                    )
+                output_dir = output_path_value
+                output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            if output_path_value.exists() and output_path_value.is_dir():
+                output_dir = output_path_value
 
-    input_path = Path(args.input_pdf).expanduser().resolve()
-    if not input_path.exists():
-        raise SystemExit(f"Input file does not exist: {input_path}")
-    if input_path.suffix.lower() != ".pdf":
-        raise SystemExit("Input file must be a PDF")
+    for input_path in input_paths:
+        if args.inplace:
+            output_path = input_path
+        elif output_dir:
+            output_path = output_dir / input_path.name
+        elif args.output and len(input_paths) == 1:
+            output_path = Path(args.output).expanduser().resolve()
+        else:
+            output_path = input_path.with_name(f"{input_path.stem}_compressed.pdf")
 
-    if args.inplace:
-        output_path = input_path
-    elif args.output:
-        output_path = Path(args.output).expanduser().resolve()
+        print(
+            f"Compressing {input_path.name} -> {output_path.name} | "
+            f"dpi={args.dpi} quality={args.quality}"
+        )
+        compress_pdf(input_path, output_path, args.dpi, args.quality)
+
+    if len(input_paths) == 1:
+        print(f"Wrote {output_path}")
     else:
-        output_path = input_path.with_name(f"{input_path.stem}_compressed.pdf")
-
-    print(
-        f"Compressing {input_path.name} -> {output_path.name} | "
-        f"dpi={args.dpi} quality={args.quality}"
-    )
-    compress_pdf(input_path, output_path, args.dpi, args.quality)
-    print(f"Wrote {output_path}")
+        print(f"Processed {len(input_paths)} file(s)")
 
 
 if __name__ == "__main__":
