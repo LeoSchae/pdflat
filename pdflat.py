@@ -2,6 +2,7 @@
 import argparse
 import io
 from pathlib import Path
+import re
 
 import fitz
 from PIL import Image
@@ -26,6 +27,14 @@ def parse_args() -> argparse.Namespace:
         help="JPEG quality (0-100, higher is better).",
     )
     parser.add_argument(
+        "--width",
+        help="Optional output width (e.g. a4, 21cm, 8.27in, 1200px).",
+    )
+    parser.add_argument(
+        "--height",
+        help="Optional output height (e.g. a4, 29.7cm, 11.69in, 1600px).",
+    )
+    parser.add_argument(
         "input_pdfs",
         nargs="+",
         help="One or more input PDF paths.",
@@ -43,6 +52,60 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+PAPER_SIZES_MM = {
+    "a0": (841, 1189),
+    "a1": (594, 841),
+    "a2": (420, 594),
+    "a3": (297, 420),
+    "a4": (210, 297),
+    "a5": (148, 210),
+    "a6": (105, 148),
+    "a7": (74, 105),
+    "a8": (52, 74),
+    "a9": (37, 52),
+    "letter": (215.9, 279.4),
+}
+
+
+def mm_to_points(value_mm: float) -> float:
+    return value_mm * 72.0 / 25.4
+
+
+def parse_length(value: str, dpi: int, dimension: str) -> float:
+    """ Return length in points for the given dimension (width or height) """
+    if not value:
+        raise ValueError("Length value is required")
+    if not dimension in ("width", "height"):
+        raise ValueError("Dimension must be 'width' or 'height'")
+
+    normalized = value.strip().lower()
+    if normalized in PAPER_SIZES_MM:
+        width_mm, height_mm = PAPER_SIZES_MM[normalized]
+        return mm_to_points(width_mm if dimension == "width" else height_mm)
+
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(cm|in|px)", normalized)
+    if not match:
+        raise ValueError(
+            "Invalid length. Use a0-a9, letter, or values like 21cm, 8.27in, 1200px."
+        )
+
+    number = float(match.group(1))
+    unit = match.group(2)
+    if number <= 0:
+        raise ValueError("Length must be a positive number")
+
+    if unit == "cm":
+        return mm_to_points(number * 10.0)
+    if unit == "in":
+        return number * 72.0
+    if unit == "px":
+        if dpi <= 0:
+            raise ValueError("--dpi must be a positive integer")
+        return number * 72.0 / dpi
+
+    raise ValueError("Unsupported length unit")
+
+
 def pixmap_to_rgb(pix: fitz.Pixmap) -> Image.Image:
     if pix.n == 1:
         image = Image.frombytes("L", (pix.width, pix.height), pix.samples)
@@ -56,18 +119,45 @@ def pixmap_to_rgb(pix: fitz.Pixmap) -> Image.Image:
     return image
 
 
-def compress_pdf(input_path: Path, output_path: Path, dpi: int, quality: int) -> None:
+def compress_pdf(
+    input_path: Path,
+    output_path: Path,
+    dpi: int,
+    quality: int,
+    target_width: float | None,
+    target_height: float | None,
+) -> None:
     if quality < 0 or quality > 100:
         raise ValueError("--quality must be between 0 and 100")
     if dpi <= 0:
         raise ValueError("--dpi must be a positive integer")
 
-    zoom = dpi / 72.0
-    matrix = fitz.Matrix(zoom, zoom)
-
     with fitz.open(input_path) as source:
         output = fitz.open()
         for page in source:
+            rect = page.rect
+            page_width = rect.width
+            page_height = rect.height
+
+            if target_width and target_height:
+                output_width = target_width
+                output_height = target_height
+                scale = min(output_width / page_width, output_height / page_height)
+            elif target_width:
+                scale = target_width / page_width
+                output_width = target_width
+                output_height = page_height * scale
+            elif target_height:
+                scale = target_height / page_height
+                output_height = target_height
+                output_width = page_width * scale
+            else:
+                scale = 1.0
+                output_width = page_width
+                output_height = page_height
+
+            zoom = (dpi * scale) / 72.0
+            matrix = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=matrix, alpha=False)
             image = pixmap_to_rgb(pix)
             buffer = io.BytesIO()
@@ -79,9 +169,14 @@ def compress_pdf(input_path: Path, output_path: Path, dpi: int, quality: int) ->
                 progressive=True,
             )
             buffer.seek(0)
-            rect = page.rect
-            out_page = output.new_page(width=rect.width, height=rect.height)
-            out_page.insert_image(rect, stream=buffer.getvalue())
+            out_page = output.new_page(width=output_width, height=output_height)
+
+            image_width = page_width * scale
+            image_height = page_height * scale
+            x0 = max(0.0, (output_width - image_width) / 2.0)
+            y0 = max(0.0, (output_height - image_height) / 2.0)
+            image_rect = fitz.Rect(x0, y0, x0 + image_width, y0 + image_height)
+            out_page.insert_image(image_rect, stream=buffer.getvalue())
 
         output.save(output_path, deflate=True, garbage=4)
         output.close()
@@ -91,6 +186,9 @@ def main() -> None:
     args = parse_args()
     if args.output and args.inplace:
         raise SystemExit("Use either --output or --inplace, not both")
+    if args.width or args.height:
+        if args.width is None and args.height is None:
+            raise SystemExit("--width or --height must be provided")
 
     input_paths = [Path(path).expanduser().resolve() for path in args.input_pdfs]
     for input_path in input_paths:
@@ -120,6 +218,24 @@ def main() -> None:
             if output_path_value.exists() and output_path_value.is_dir():
                 output_dir = output_path_value
 
+    target_width = None
+    target_height = None
+    try:
+        if args.width:
+            target_width = parse_length(args.width, args.dpi, "width")
+        if args.height:
+            target_height = parse_length(args.height, args.dpi, "height")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    size_label = []
+    if args.width:
+        size_label.append(f"width={args.width}")
+    if args.height:
+        size_label.append(f"height={args.height}")
+    size_label_text = " ".join(size_label) if size_label else "original size"
+    print(f"Options: dpi={args.dpi} quality={args.quality} {size_label_text}")
+
     for input_path in input_paths:
         if args.inplace:
             output_path = input_path
@@ -130,11 +246,15 @@ def main() -> None:
         else:
             output_path = input_path.with_name(f"{input_path.stem}_compressed.pdf")
 
-        print(
-            f"Compressing {input_path.name} -> {output_path.name} | "
-            f"dpi={args.dpi} quality={args.quality}"
+        print(f"Compressing {input_path.name} -> {output_path.name}")
+        compress_pdf(
+            input_path,
+            output_path,
+            dpi=args.dpi,
+            quality=args.quality,
+            target_width=target_width,
+            target_height=target_height,
         )
-        compress_pdf(input_path, output_path, args.dpi, args.quality)
 
     if len(input_paths) == 1:
         print(f"Wrote {output_path}")
