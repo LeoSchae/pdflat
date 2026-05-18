@@ -28,11 +28,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--width",
-        help="Optional output width (e.g. a4, 21cm, 8.27in, 1200px).",
+        help="Optional output width (e.g. a4, a4~, 21cm, 8.27in, 1200px).",
     )
     parser.add_argument(
         "--height",
-        help="Optional output height (e.g. a4, 29.7cm, 11.69in, 1600px).",
+        help="Optional output height (e.g. a4, a4~, 29.7cm, 11.69in, 1600px).",
     )
     parser.add_argument(
         "input_pdfs",
@@ -54,18 +54,34 @@ def parse_args() -> argparse.Namespace:
 
 PAPER_SIZES_MM = {
     "a0": (841, 1189),
+    "a0~": (1189, 841),
     "a1": (594, 841),
+    "a1~": (841, 594),
     "a2": (420, 594),
+    "a2~": (594, 420),
     "a3": (297, 420),
+    "a3~": (420, 297),
     "a4": (210, 297),
+    "a4~": (297, 210),
     "a5": (148, 210),
+    "a5~": (210, 148),
     "a6": (105, 148),
+    "a6~": (148, 105),
     "a7": (74, 105),
+    "a7~": (105, 74),
     "a8": (52, 74),
+    "a8~": (74, 52),
     "a9": (37, 52),
+    "a9~": (52, 37),
+    "a10": (26, 37),
+    "a10~": (37, 26),
     "letter": (215.9, 279.4),
+    "letter~": (279.4, 215.9),
+    "legal": (215.9, 355.6),
+    "legal~": (355.6, 215.9),
+    "tabloid": (279.4, 431.8),
+    "tabloid~": (431.8, 279.4),
 }
-
 
 def mm_to_points(value_mm: float) -> float:
     return value_mm * 72.0 / 25.4

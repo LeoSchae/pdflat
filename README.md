@@ -49,6 +49,9 @@ python3 pdflat.py --dpi 300 --quality 90 --width a4 --height a4 --inplace in/*.p
 
 - `--dpi` controls rasterization resolution.
 - `--quality` controls JPEG quality (0-100, higher = better quality, larger files).
-- `--width` and `--height` set the output canvas size (a0-a9, letter, cm, in, px).
+- `--width` and `--height` set the output canvas size. Options are:
+    - Standard paper sizes: `a1-a10`, `letter`, `legal` (for landscape add `~` as a suffix, e.g. `a4~`).
+    - Custom length with unit (e.g. `210mm`, `8.5in`, `595px`).
 - `--output` sets the output PDF path (or a directory when multiple inputs are provided).
-- `--inplace` overwrites the input PDF (cannot be used in combination with `--output`)
+- `--inplace` overwrites the input PDF
+    - Cannot be used in combination with `--output`
